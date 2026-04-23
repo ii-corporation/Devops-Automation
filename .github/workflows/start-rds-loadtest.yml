@@ -1,0 +1,62 @@
+name: Start RDS Loadtest Cluster
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "start" to confirm starting the RDS cluster'
+        required: true
+        default: ''
+
+jobs:
+  start-rds:
+    name: Start influencer-index-loadtest-aurora-mysql
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'start'
+
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-1
+
+      - name: Check current cluster status
+        id: check_status
+        run: |
+          STATUS=$(aws rds describe-db-clusters \
+            --db-cluster-identifier influencer-index-loadtest-aurora-mysql \
+            --query 'DBClusters[0].Status' \
+            --output text)
+          echo "Current status: $STATUS"
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+
+      - name: Start RDS cluster
+        if: steps.check_status.outputs.status == 'stopped'
+        run: |
+          echo "Starting cluster influencer-index-loadtest-aurora-mysql..."
+          aws rds start-db-cluster \
+            --db-cluster-identifier influencer-index-loadtest-aurora-mysql
+          echo "Start command issued."
+
+      - name: Skip if already running
+        if: steps.check_status.outputs.status != 'stopped'
+        run: |
+          echo "Cluster is already in status: ${{ steps.check_status.outputs.status }}. Skipping start."
+
+      - name: Wait for cluster to be available
+        if: steps.check_status.outputs.status == 'stopped'
+        run: |
+          echo "Waiting for cluster to become available (this may take 5-10 minutes)..."
+          aws rds wait db-cluster-available \
+            --db-cluster-identifier influencer-index-loadtest-aurora-mysql
+          echo "Cluster is now available!"
+
+      - name: Final status
+        run: |
+          STATUS=$(aws rds describe-db-clusters \
+            --db-cluster-identifier influencer-index-loadtest-aurora-mysql \
+            --query 'DBClusters[0].Status' \
+            --output text)
+          echo "Final cluster status: $STATUS"
